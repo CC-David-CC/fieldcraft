@@ -314,3 +314,5 @@ Used only by tests (dev-dependencies, not shipped); no code from them is copied 
 |---|---|---|
 | crates/mesh/src/predicates/tests.rs, crates/mesh/tests/predicates_bench.rs | `robust` (georust), a port of Shewchuk's public-domain `predicates.c` | MIT OR Apache-2.0 |
 | crates/mesh/src/predicates/tests.rs, crates/mesh/src/predicates/dyadic.rs (tests) | `num-bigint`, `num-rational`, `num-traits` (exact rationals) | MIT OR Apache-2.0 |
+
+The WebOS account message transport and scoped document protocol in `apps/fieldcraft-web/src/account_port.rs` and `account.rs` were adapted from the WebOS SolidCraft integration (MIT OR Apache-2.0). FieldCraft supplies the model, solver commands, native persistence and revision rules.

@@ -115,7 +115,13 @@ fn open_sample(s: &mut Session, p: &Value) -> Result<Value> {
     let sample = crate::sample::find(name).ok_or_else(|| EngineError::Params(format!("no sample `{name}` (samples: {})", names())))?;
     let mut opened = Session::default();
     if let Some(recipe) = sample.design {
-        opened.design = Some(Arc::new(open_design(&fieldcraft_geometry::script_design(recipe)?)?));
+        let bytes = fieldcraft_geometry::script_design(recipe)?;
+        opened.design = Some(Arc::new(open_design(&bytes)?));
+        if s.account_host {
+            let source = SourceFile::of(format!("{}.solidcraft", sample.name), &bytes)?;
+            opened.embedded.insert(source.sha256().into(), Arc::new(bytes));
+            opened.sources.design = Some(source);
+        }
     }
     if let Some(prepare) = sample.prepare {
         opened.run_script(&prepare())?;
@@ -372,6 +378,7 @@ impl Session {
     /// file access (and where its commands come from); the history starts empty.
     pub(super) fn replace_with(&mut self, mut opened: Session) {
         opened.history = std::mem::take(&mut self.history);
+        opened.account_host = self.account_host;
         opened.limits = self.limits;
         opened.file_access = std::mem::take(&mut self.file_access);
         opened.crash_journal = self.crash_journal;
@@ -383,6 +390,83 @@ impl Session {
         opened.clear_history();
         opened.mark_opened();
         *self = opened;
+    }
+}
+
+/// Native inputs to the saved file. Solving and view changes matter even without a model edit.
+#[derive(Clone, Debug)]
+pub struct AccountVersion {
+    opened: u64,
+    revision: u64,
+    results: u64,
+    run: fieldcraft_io::Run,
+    view: fieldcraft_io::View,
+}
+
+impl AccountVersion {
+    pub fn matches(&self, s: &Session) -> bool {
+        self.opened == s.opened && self.revision == s.revision && self.results == s.results_stored && self.run == s.run && self.view == s.view
+    }
+}
+
+impl Session {
+    pub fn new_account_model(sample: Option<&str>) -> Result<Session> {
+        let mut session = Session { account_host: true, ..Session::default() };
+        if let Some(name) = sample {
+            open_sample(&mut session, &json!({"name":name}))?;
+        } else {
+            session.mark_opened();
+        }
+        Ok(session)
+    }
+
+    pub fn account_version(&self) -> AccountVersion {
+        AccountVersion { opened: self.opened, revision: self.revision, results: self.results_stored, run: self.run.clone(), view: self.view.clone() }
+    }
+
+    /// A portable model, including solved results and every referenced geometry asset.
+    pub fn account_bytes(&self) -> Result<Vec<u8>> {
+        if self.design.is_some() && self.sources.design.is_none() {
+            return Err(EngineError::Params("The design has no source to embed; save a model with its original geometry.".into()));
+        }
+        self.file_bytes_with(None, Keep { results: true, geometry: true })
+    }
+
+    /// Restore native file bytes without resolving any account filename through the OS.
+    pub fn open_account_model(path: Option<String>, bytes: &[u8], recover: bool) -> Result<Session> {
+        let mut session = Session { file_access: Roots::new(None, None)?, ..Session::default() };
+        let result = load(&mut session, bytes, path, !recover)?;
+        if let Some(warnings) = result["warnings"].as_array() {
+            if let Some(problem) = warnings
+                .iter()
+                .filter_map(Value::as_str)
+                .find(|w| w.contains("opens without") || w.contains("was not opened") && !w.contains("opened instead"))
+            {
+                return Err(EngineError::Params(format!("Account model has unavailable geometry: {problem}")));
+            }
+        }
+        session.account_host = true;
+        session.file_access = Roots::unconfined();
+        if !recover {
+            session.saved_results = session.results_stored;
+        }
+        Ok(session)
+    }
+
+    /// Bind only the acknowledged snapshot. Edits made after capture remain unsaved.
+    pub fn confirm_account_save(&mut self, path: String, captured: AccountVersion) -> Result<()> {
+        if captured.opened != self.opened {
+            return Err(EngineError::Params("The save belongs to another FieldCraft model.".into()));
+        }
+        self.path = Some(path);
+        self.migrated_from = None;
+        self.migration_notes.clear();
+        self.saved_revision = Some(captured.revision);
+        self.saved_results = captured.results;
+        self.saved_run = captured.run;
+        self.saved_view = captured.view;
+        self.pack_geometry = true;
+        Ok(())
     }
 }
 

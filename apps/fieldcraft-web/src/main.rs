@@ -19,6 +19,10 @@
 #![forbid(unsafe_code)]
 
 #[cfg(target_arch = "wasm32")]
+mod account;
+#[cfg(target_arch = "wasm32")]
+mod account_port;
+#[cfg(target_arch = "wasm32")]
 mod deploy;
 #[cfg(target_arch = "wasm32")]
 mod storage;

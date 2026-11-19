@@ -53,10 +53,22 @@ pub type PickFile = Box<dyn Fn(FilePicker) -> Pin<Box<dyn Future<Output = Option
 /// The host opens a web link in the user's browser.
 pub type OpenUrl = Box<dyn Fn(&str) -> Result<(), String>>;
 
+/// Native document controls delegated to an account host.
+pub enum AccountFile {
+    New,
+    Sample(String),
+    Open(Option<String>),
+    Save,
+    SaveAs(String),
+}
+
+pub type AccountFileFn = Box<dyn Fn(AccountFile) -> Result<(), String>>;
+
 /// What the host provides: native file pickers and where the recent-files list is kept. The
 /// desktop app installs them; tests answer the pickers with closures.
 #[derive(Default)]
 pub struct Services {
+    pub account_file: Option<AccountFileFn>,
     /// Preferred over the synchronous services (which remain useful for the browser and tests).
     pub pick_file: Option<PickFile>,
     pub pick_open: Option<PickOpen>,
@@ -812,6 +824,12 @@ impl ModelApp {
     /// succeeds. A command that brings a whole model (`fresh`: opening a model, recovering one)
     /// starts from an empty session, the others from a copy of this one. One at a time.
     fn begin_job(&mut self, command: &'static str, mut params: Value, title: String, done: String, recent: Option<String>) -> bool {
+        if self.services.account_file.is_some()
+            && (matches!(command, "file.open" | "file.recover" | "file.sample" | "deck.read") || command == "file.new")
+        {
+            self.set_status("Use Files to open another account model in its own window.", true);
+            return false;
+        }
         if self.ensure_idle().is_err() {
             return false;
         }
@@ -900,7 +918,18 @@ impl ModelApp {
 
     /// File > Open: pick a model, design or tagged mesh and open it. `None` asks for any of them.
     /// Without a picker service the command's form opens instead.
+    fn account_file(&mut self, action: AccountFile) -> bool {
+        let Some(service) = &self.services.account_file else { return false };
+        if let Err(error) = service(action) {
+            self.set_status(error, true);
+        }
+        true
+    }
+
     pub fn open_dialog(&mut self, kind: Option<Kind>) {
+        if matches!(kind, None | Some(Kind::Model)) && self.account_file(AccountFile::Open(None)) {
+            return;
+        }
         if !self.has_open_picker() {
             self.open_form(kind.unwrap_or(Kind::Model).command(), json!({}));
             return;
@@ -945,6 +974,9 @@ impl ModelApp {
     /// Open a file the user chose (picked, dropped or from the recent list) by its type. A model
     /// replacing unsaved changes asks first.
     pub fn open_path(&mut self, path: &str) {
+        if Kind::of(path) == Some(Kind::Model) && self.account_file(AccountFile::Open(Some(path.to_owned()))) {
+            return;
+        }
         let Some(kind) = Kind::of(path) else {
             self.set_status(
                 format!("{path}: FieldCraft opens .fieldcraft models, .solidcraft designs, .3mf tagged meshes and .msh orphan meshes"),
@@ -973,6 +1005,9 @@ impl ModelApp {
     /// The start page and File › Samples…: open a sample model, asking first when that
     /// would discard unsaved changes.
     pub fn open_sample(&mut self, name: &str) {
+        if self.account_file(AccountFile::Sample(name.to_owned())) {
+            return;
+        }
         let Some(sample) = fieldcraft_engine::sample::find(name) else {
             // An unknown name (a typo, an old `?sample=` link): the samples to choose from (#200).
             self.set_status(format!("There is no sample `{name}`: choose one of these"), true);
@@ -989,6 +1024,9 @@ impl ModelApp {
     /// File › New (`file.new`): start an empty model, asking first when that would discard
     /// unsaved changes.
     pub fn new_model(&mut self) {
+        if self.account_file(AccountFile::New) {
+            return;
+        }
         if self.has_unsaved_work() {
             self.prompt = Some(Prompt::Unsaved(Replace::New));
             return;
@@ -1219,6 +1257,9 @@ impl ModelApp {
 
     /// File > Save: to the model's file, or Save As when it has none. Returns whether it saved.
     pub fn save(&mut self) -> bool {
+        if self.account_file(AccountFile::Save) {
+            return false;
+        }
         if self.session.path.is_none() {
             return self.save_as();
         }
@@ -1251,6 +1292,9 @@ impl ModelApp {
     }
 
     fn save_as_then(&mut self, params: Value, next: Option<Replace>) -> bool {
+        if self.account_file(AccountFile::SaveAs(format!("{}.fieldcraft", self.model_name()))) {
+            return false;
+        }
         if !self.has_save_picker() {
             self.open_form("file.save_as", params);
             return false;

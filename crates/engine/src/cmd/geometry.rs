@@ -142,7 +142,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     });
     // Another design file (or a new model) is another document; the same file opened again after
     // an edit is the same one.
-    if new_model || s.sources.design.as_ref().is_none_or(|d| d.path() != source.path()) {
+    if !s.account_host && (new_model || s.sources.design.as_ref().is_none_or(|d| d.path() != source.path())) {
         s.mark_opened();
     }
     s.design = Some(Arc::new(design));

@@ -73,22 +73,57 @@ pub fn start() {
     // The browser's clock for the recovery entries (the plain wasm target has none).
     fieldcraft_io::recovery::set_clock(|| js_sys::Date::now().max(0.0) as u64);
     let Some(window) = web_sys::window() else { return };
-    ask_before_unload(&window);
-    crate::usage::send_when_hidden(&window);
+    let hosted = query().trim_start_matches('?').split('&').any(|q| q == "host=webos-account");
+    if !hosted {
+        ask_before_unload(&window);
+        crate::usage::send_when_hidden(&window);
+    }
     let Some(canvas) = element(CANVAS_ID).and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok()) else {
         log::error!("missing <canvas id=\"{CANVAS_ID}\">");
         return;
     };
     wasm_bindgen_futures::spawn_local(async move {
+        let port = if hosted {
+            match crate::account_port::AccountPort::connect() {
+                Ok(port) => Some(port),
+                Err(error) => {
+                    failed(&error);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let (session, identity) = if let Some(port) = &port {
+            match crate::account::open(port).await {
+                Ok((session, id)) => (session, Some(id)),
+                Err(error) => {
+                    port.startup_failed(&error);
+                    failed(&error);
+                    return;
+                }
+            }
+        } else {
+            (Session::default(), None)
+        };
+        let app_port = port.clone();
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
                 web_options(),
-                Box::new(|cc| {
+                Box::new(move |cc| {
                     let inbox = Inbox::default();
-                    let mut app = ModelApp::new(Session::default()).with_services(services(inbox.clone(), cc.egui_ctx.clone()));
+                    let mut services = services(inbox.clone(), cc.egui_ctx.clone());
+                    let account = app_port.map(|port| {
+                        port.wake_on(cc.egui_ctx.clone());
+                        let view = crate::account::AccountView::new(port, &session);
+                        services.account_file = Some(view.design_service());
+                        services.prefs = None;
+                        view
+                    });
+                    let mut app = ModelApp::new(session).with_services(services);
                     // Anonymous usage: asked once, recorded only when the user agreed (docs/privacy.md).
-                    if let Some(host) = crate::usage::host() {
+                    if !hosted && let Some(host) = crate::usage::host() {
                         app = app.with_usage(host);
                     }
                     if let Some(rs) = &cc.wgpu_render_state {
@@ -97,22 +132,37 @@ pub fn start() {
                         app.set_wgpu(rs, DEPTH_BITS, rs.msaa_samples, &cc.egui_ctx);
                     }
                     // The autosaves a closed or crashed page left, back in the recovery folder.
-                    let store = Store::load();
-                    let listed = app.session.execute("file.recovery.list", &serde_json::json!({}));
-                    let recoverable = listed.ok().and_then(|v| v.as_array().map(Vec::len)).unwrap_or(0);
-                    let autosaver = Autosaver::new(storage::dir()).map_err(|e| log::warn!("autosave unavailable: {e}")).ok();
-                    if let Some(name) = crate::sample_in_query(&query()) {
-                        app.open_sample(&name);
-                    }
-                    app.launch_start();
-                    if recoverable > 0 {
-                        app.set_status(format!("{recoverable} autosaved model(s) can be recovered: File › Recover…"), false);
-                    }
+                    let store = if hosted { None } else { Some(Store::load()) };
+                    let autosaver = if hosted {
+                        None
+                    } else {
+                        let listed = app.session.execute("file.recovery.list", &serde_json::json!({}));
+                        let recoverable = listed.ok().and_then(|v| v.as_array().map(Vec::len)).unwrap_or(0);
+                        if let Some(name) = crate::sample_in_query(&query()) {
+                            app.open_sample(&name);
+                        }
+                        app.launch_start();
+                        if recoverable > 0 {
+                            app.set_status(format!("{recoverable} autosaved model(s) can be recovered: File › Recover…"), false);
+                        }
+                        Autosaver::new(storage::dir()).map_err(|e| log::warn!("autosave unavailable: {e}")).ok()
+                    };
                     let deploy = crate::deploy::Watch::start();
-                    Ok(Box::new(Shell { app, inbox, store, autosaver, autosaved_at: 0.0, storage_error: false, sent_at: 0.0, deploy }))
+                    Ok(Box::new(Shell { app, inbox, store, account, autosaver, autosaved_at: 0.0, storage_error: false, sent_at: 0.0, deploy }))
                 }),
             )
             .await;
+        if let Some(port) = &port {
+            match (&result, identity) {
+                (Ok(()), Some(id)) => {
+                    if let Err(error) = port.publish("started", id, None) {
+                        port.startup_failed(&error);
+                    }
+                }
+                (Err(e), _) => port.startup_failed(&js_err(e.clone())),
+                _ => {}
+            }
+        }
         match result {
             Ok(()) => {
                 if let Some(el) = element(LOADING_ID) {
@@ -207,7 +257,8 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
 struct Shell {
     app: ModelApp,
     inbox: Inbox,
-    store: Store,
+    store: Option<Store>,
+    account: Option<crate::account::AccountView>,
     /// `None` when autosave could not start.
     autosaver: Option<Autosaver>,
     /// App time of the last autosave check.
@@ -251,7 +302,8 @@ impl Shell {
     fn hand_out_writes(&mut self) {
         for (path, bytes) in fieldcraft_io::fs::take_writes() {
             if path.parent() == Some(storage::dir()) {
-                match self.store.put(&path, &bytes) {
+                let Some(store) = &mut self.store else { continue };
+                match store.put(&path, &bytes) {
                     Ok(()) => self.storage_error = false,
                     Err(e) if !self.storage_error => {
                         self.storage_error = true;
@@ -263,7 +315,9 @@ impl Shell {
                 self.app.set_status(format!("{}: the download did not start ({e})", path.display()), true);
             }
         }
-        self.store.sync_removals();
+        if let Some(store) = &mut self.store {
+            store.sync_removals();
+        }
     }
 
     fn autosave(&mut self, ctx: &egui::Context) {
@@ -279,9 +333,25 @@ impl Shell {
 }
 
 impl eframe::App for Shell {
+    fn persist_egui_memory(&self) -> bool {
+        self.account.is_none()
+    }
+
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(account) = &mut self.account {
+            account.poll(&mut self.app);
+            if account.suspended() {
+                return;
+            }
+        }
         self.open_arrived();
         self.app.logic(ctx);
+        if let Some(account) = &mut self.account {
+            if let Err(e) = account.publish_state(&self.app) {
+                self.app.set_status(e, true);
+            }
+            return;
+        }
         self.autosave(ctx);
         if self.app.now - self.sent_at >= crate::usage::INTERVAL {
             self.sent_at = self.app.now;
@@ -301,6 +371,11 @@ impl eframe::App for Shell {
     /// Dropped files are read here (browsers read them asynchronously) and arrive through the
     /// inbox; the app never sees their names as paths.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if self.account.as_ref().is_some_and(|a| a.suspended()) {
+            raw.events.clear();
+            raw.dropped_files.clear();
+            return;
+        }
         let dropped = std::mem::take(&mut raw.dropped_files);
         if !dropped.is_empty() {
             let (inbox, ctx) = (self.inbox.clone(), ctx.clone());
@@ -321,7 +396,18 @@ impl eframe::App for Shell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.account.as_ref().is_some_and(|a| a.suspended()) {
+            return;
+        }
         self.app.ui(ui);
+        if let Some(account) = &mut self.account {
+            if std::mem::take(&mut self.app.quit_requested) {
+                account.request_close();
+            }
+            if let Err(e) = account.publish_state(&self.app) {
+                self.app.set_status(e, true);
+            }
+        }
         // Once a frame, after everything that writes: autosaves, saves and decks.
         self.hand_out_writes();
     }

@@ -22,6 +22,7 @@ pub mod logfile;
 pub mod machine;
 
 pub use cmd::analytic_surfaces;
+pub use cmd::file::AccountVersion;
 pub use cmd::replace::{MESHERS, Replacement, replacement, thousands};
 pub use cmd::update::enable_checks as enable_update_checks;
 /// Write an output (a picture, an export) where a user named, never over a model or design.
@@ -311,6 +312,8 @@ impl Default for Limits {
 /// The model being edited, the geometry it is built on and the commands that built it.
 #[derive(Debug, Clone, Default)]
 pub struct Session {
+    /// This document belongs to an account window. Only its host can replace or save it.
+    account_host: bool,
     pub model: Model,
     /// The open SolidCraft design (`geometry.open`); shared, so a snapshot costs nothing.
     pub design: Option<Arc<Design>>,
@@ -431,6 +434,12 @@ impl Session {
     /// Run a command. On an error or a panic the model, the design and the surfaces are left as
     /// they were.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
+        if self.account_host
+            && (matches!(id, "file.open" | "file.save" | "file.save_as" | "file.new" | "file.sample" | "file.recover" | "deck.read")
+                || id == "geometry.open" && params.get("model").and_then(Value::as_str) == Some("new"))
+        {
+            return Err(EngineError::Params("Use account Open, New or Save to change the bound model.".into()));
+        }
         // An id from hostile input is not echoed in full.
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.chars().take(100).collect()))?;
         let timer = usage::Timer::start(self.origin);
@@ -861,6 +870,7 @@ impl Session {
     /// requests, so a view the opened model shows is a request the host has not seen yet.
     pub fn empty_like(&self) -> Session {
         Session {
+            account_host: self.account_host,
             limits: self.limits,
             file_access: self.file_access.clone(),
             crash_journal: self.crash_journal,
