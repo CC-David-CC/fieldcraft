@@ -74,7 +74,7 @@ impl AccountView {
     }
 
     fn unfinished(app: &ModelApp) -> bool {
-        app.busy().is_some() || app.dialog.is_some() || app.prompt.is_some()
+        app.busy().is_some() || app.dialog.is_some() || app.prompt.is_some() || app.node_drag.is_some()
     }
 
     fn state(&self, app: &ModelApp) -> Value {

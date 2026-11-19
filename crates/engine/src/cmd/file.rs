@@ -453,6 +453,25 @@ impl Session {
         Ok(session)
     }
 
+    /// A UI job starts with a clone of the model. Its results must keep any account
+    /// acknowledgement that arrived in the live window while the job was running.
+    pub fn follow_account_binding(&mut self, live: &Session) -> Result<()> {
+        if !live.account_host {
+            return Ok(());
+        }
+        if !self.account_host || live.opened != self.opened {
+            return Err(EngineError::Params("The job belongs to another FieldCraft model.".into()));
+        }
+        self.path.clone_from(&live.path);
+        self.saved_revision = live.saved_revision;
+        self.saved_results = live.saved_results;
+        self.saved_view.clone_from(&live.saved_view);
+        self.saved_run.clone_from(&live.saved_run);
+        self.migrated_from = live.migrated_from;
+        self.migration_notes.clone_from(&live.migration_notes);
+        Ok(())
+    }
+
     /// Bind only the acknowledged snapshot. Edits made after capture remain unsaved.
     pub fn confirm_account_save(&mut self, path: String, captured: AccountVersion) -> Result<()> {
         if captured.opened != self.opened {

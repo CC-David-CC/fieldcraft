@@ -1179,6 +1179,10 @@ impl ModelApp {
     fn take_opened(&mut self, o: Opened) {
         // The session it replaces may be large: it is freed off the window thread.
         let mut session = *o.session;
+        if let Err(error) = session.follow_account_binding(&self.session) {
+            self.set_status(error.to_string(), true);
+            return;
+        }
         // Its commands come from where the window's do now (the job may have started from the
         // command search or the control channel).
         session.origin = self.session.origin;

@@ -45,3 +45,16 @@ fn later_edits_remain_dirty_and_another_project_cannot_adopt_the_receipt() {
     assert!(s.execute("file.save", &json!({})).is_err());
     assert!(s.execute("file.new", &json!({})).is_err());
 }
+
+#[test]
+fn solver_job_keeps_server_receipt_received_after_it_started() {
+    let mut live = Session::new_account_model(Some("cantilever")).unwrap();
+    let mut worker = live.clone();
+    live.confirm_account_save("Documents/Resaved.fieldcraft".into(), live.account_version()).unwrap();
+    worker.execute("solve.static", &json!({})).unwrap();
+    worker.follow_account_binding(&live).unwrap();
+    assert_eq!(worker.path, live.path);
+    assert!(worker.is_dirty(), "the newly solved field was not in the acknowledged save");
+    let replacement = Session::new_account_model(None).unwrap();
+    assert!(worker.follow_account_binding(&replacement).is_err());
+}
