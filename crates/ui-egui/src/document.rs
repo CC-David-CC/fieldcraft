@@ -52,6 +52,10 @@ impl ModelApp {
             // Window: last frame's layout, devices, counters.
             shell: _,
             toolbar_rects: _,
+            // Whether this frame's input came from the control channel.
+            driven: _,
+            // The title bar's offer span as drawn last frame.
+            offer_drawn: _,
             gpu_info: _,
             #[cfg(not(target_arch = "wasm32"))]
                 capturer: _,
