@@ -34,6 +34,7 @@ impl ModelApp {
         let ModelApp {
             // The document itself, replaced by the command.
             session: _,
+            compact_panel,
             ui,
             // The camera is framed home on the new document ([`ModelApp::frame_new_document`]).
             cam: _,
@@ -174,6 +175,7 @@ impl ModelApp {
         pick.document_replaced();
         // Hits may name the old document's items.
         *search = None;
+        *compact_panel = crate::appbar::CompactPanel::View;
     }
 }
 
