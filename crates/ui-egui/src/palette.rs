@@ -133,6 +133,11 @@ fn field_rect(screen: Rect, field: Rect) -> Rect {
     Rect::from_min_size(egui::pos2(x, field.top()), egui::vec2(width, field.height()))
 }
 
+/// Top left of the expanded search field, constrained to this viewport.
+pub fn open_field_at(screen: Rect, field: Rect) -> egui::Pos2 {
+    field_rect(screen, field).min
+}
+
 /// The command search: the kit's search field opened where the ribbon's closed field is, with
 /// the kit's results sheet under it, as SolidCraft's command search opens.
 pub fn popup(app: &mut ModelApp, ctx: &egui::Context) {
