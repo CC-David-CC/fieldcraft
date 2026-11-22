@@ -410,6 +410,7 @@ struct Shot {
 }
 
 pub struct ModelApp {
+    compact_panel: appbar::CompactPanel,
     pub session: Session,
     pub ui: UiState,
     pub cam: Camera,
@@ -602,6 +603,7 @@ impl ModelApp {
         ModelApp {
             session,
             ui: UiState::default(),
+            compact_panel: appbar::CompactPanel::default(),
             cam: Camera::default(),
             status: None,
             dialog: None,
@@ -2491,20 +2493,25 @@ impl ModelApp {
     fn shell(&mut self, ui: &mut egui::Ui) {
         self.shell.clear(self.ui.history_dock);
         // The workspace and ribbon cards first, over the whole width below the application bar.
-        toolbar::toolbar(self, ui);
+        let compact = appbar::compact(ui);
+        if !compact {
+            toolbar::toolbar(self, ui);
+        }
         let rest = ui.available_rect_before_wrap();
         // The cards over the view: History at its dock first, then the browser on the left and
         // the context cards on the right, clear of the top cards and History.
         let mut over = ui.new_child(egui::UiBuilder::new().id_salt("fc_shell_cards").max_rect(rest));
-        if self.ui.show_timeline {
+        if self.ui.show_timeline && !compact {
             timeline::timeline(self, &mut over);
         }
         // What a docked host left of the view (none once every card floats).
         let view = over.available_rect_before_wrap();
-        if self.ui.show_tree {
+        if (self.ui.show_tree && !compact) || (compact && self.compact_panel == appbar::CompactPanel::Model) {
             browser::browser(self, &mut over);
         }
-        context::panel(self, &mut over);
+        if !compact || self.compact_panel == appbar::CompactPanel::Analysis || self.dialog.is_some() {
+            context::panel(self, &mut over);
+        }
         // The view last on the window's own layer: the cards are areas above it, which keep the
         // pointer over them, and its framing keeps clear of them (`viewport::overlays`).
         let mut viewport = ui.new_child(egui::UiBuilder::new().id_salt("fc_shell_view").max_rect(view));
@@ -3622,6 +3629,28 @@ mod tests {
             app.ui(ui);
         });
         out.textures_delta.clear();
+    }
+
+    #[test]
+    fn compact_analysis_keeps_solve_visible_and_panels_opt_in() {
+        let ctx = egui::Context::default();
+        let mut app = ModelApp::new(Session::default());
+        app.open_sample("cantilever");
+        app.wait_loaded();
+        for _ in 0..2 {
+            draw(&mut app, &ctx, 336.0, 776.0);
+        }
+        for key in ["app_bar:save", "ribbon:search", "app_bar:solve"] {
+            let control = app.layout.get(key).expect("phone action");
+            assert!(control.left() >= 0.0 && control.right() <= 336.0);
+        }
+        assert!(!app.layout.contains_key("browser"));
+        app.compact_panel = appbar::CompactPanel::Model;
+        draw(&mut app, &ctx, 336.0, 776.0);
+        assert!(app.layout.contains_key("browser"));
+        app.compact_panel = appbar::CompactPanel::View;
+        draw(&mut app, &ctx, 1920.0, 1080.0);
+        assert!(app.layout.contains_key("browser") && app.layout.contains_key("app_bar:solve"));
     }
 
     /// XY Plot from the ribbon opens the plot in the results panel, which runs results.xy for

@@ -96,7 +96,67 @@ const KIT_OFFER: &str = "titlebar:update";
 const SOLVE: &str = "Solve";
 const SOLVE_ICON: &str = "play";
 
+/// Phone windows keep the viewport clear until a model or analysis panel is requested.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum CompactPanel {
+    #[default]
+    View,
+    Model,
+    Analysis,
+}
+
+pub(crate) fn compact(ui: &egui::Ui) -> bool {
+    ui.ctx().content_rect().width() < 520.0
+}
+
+fn compact_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(app.ui.dark);
+    let host = kit::Container::new(ui.ctx(), kit::Surface::ApplicationBar);
+    let panel = host.edge("fc_appbar", kit::Edge::Top).exact_size(84.0).show_separator_line(false);
+    host.show_edge(ui, panel, host.edge_frame(t.app_bar), |ui| {
+        app.place("app_bar", ui.max_rect());
+        ui.spacing_mut().interact_size.y = 39.0;
+        ui.horizontal(|ui| {
+            let file = ui.button("File");
+            app.place("app_bar:file", file.rect);
+            if file.clicked() {
+                app.ui.palette = false;
+                app.toggle_menu("file");
+            }
+            crate::frame::menu(app, ui, "file", file.rect, crate::files::file_menu);
+            let save = ui.add_enabled(app.busy().is_none(), egui::Button::new("Save"));
+            app.place("app_bar:save", save.rect);
+            if save.clicked() {
+                app.save();
+            }
+            let search = ui.button("Search");
+            app.place("ribbon:search", search.rect);
+            if search.clicked() {
+                app.ui.menu = None;
+                app.ui.palette = true;
+            }
+            let ready = app.unavailable("solve.run").is_none() && app.busy().is_none();
+            let solve = ui.add_enabled(ready, egui::Button::new(SOLVE));
+            app.place("app_bar:solve", solve.rect);
+            if solve.clicked() {
+                app.solve_all();
+            }
+        });
+        ui.horizontal(|ui| {
+            for (panel, label) in [(CompactPanel::View, "View"), (CompactPanel::Model, "Model"), (CompactPanel::Analysis, "Analysis")] {
+                if ui.selectable_label(app.compact_panel == panel, label).clicked() {
+                    app.compact_panel = panel;
+                }
+            }
+        });
+    });
+}
+
 pub fn app_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
+    if compact(ui) {
+        compact_bar(app, ui);
+        return;
+    }
     let t = Tokens::get(app.ui.dark);
     // The title bar is an application-bar surface: flat and full width whatever the layout.
     let host = kit::Container::new(ui.ctx(), kit::Surface::ApplicationBar);
