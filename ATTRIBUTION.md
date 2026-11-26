@@ -255,6 +255,9 @@ is committed and listed here with its exports.
 | packaging/macos/README.txt, packaging/linux/io.github.tangencylabs.fieldcraft.desktop, packaging/linux/io.github.tangencylabs.fieldcraft.metainfo.xml, packaging/macos/entitlements.plist | FieldCraft contributors | Original packaging text: the disk image's install note, the Linux desktop entry, the AppStream metainfo and the (empty) hardened-runtime entitlements | MIT OR Apache-2.0 |
 | crates/ui-egui/fonts/Inter-SemiBold.ttf | The Inter Project Authors | https://github.com/rsms/inter release v4.1 (Inter-4.1.zip, extras/ttf/Inter-SemiBold.ttf), unmodified; licence text in crates/ui-egui/fonts/OFL.txt; captions and labels in the media tools (tools/demo-video, tools/flow-clip, tools/cooling) and docs/media; the interface itself uses SolidCraft's fonts (solidcraft-look) | SIL OFL 1.1 |
 | docs/sponsors/blacksmith-ci-powered.png | Blacksmith (blacksmith.sh) | "CI powered by Blacksmith" sponsor banner supplied by Blacksmith for the sponsorship credit; used only to credit the sponsor, not part of the application | © Blacksmith, used with permission |
+| docs/webos-qa/s10-cantilever-solved.png | WebOS contributors | Original Galaxy S10+ capture of the synthetic Cantilever sample solved in FieldCraft on WebOS | MIT OR Apache-2.0 |
+| docs/webos-qa/s10-cantilever-files-reopen.png | WebOS contributors | Original Galaxy S10+ capture of the editable sample reopened through My files | MIT OR Apache-2.0 |
+| docs/webos-qa/desktop-cantilever-modes.png | WebOS contributors | Original Chromium capture of the synthetic Cantilever mode shape in FieldCraft on WebOS | MIT OR Apache-2.0 |
 
 ## Adapted code
 
